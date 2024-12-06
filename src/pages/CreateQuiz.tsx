@@ -9,6 +9,8 @@ import { useAIQuestions } from '../hooks/useAIQuestions';
 import { QuizSettings, Question } from '../types/quiz';
 import { AlertCircle, Upload, Loader2 } from 'lucide-react';
 
+const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB in bytes
+
 const CreateQuiz: React.FC = () => {
   const [settings, setSettings] = useState<QuizSettings>({
     title: '',
@@ -19,14 +21,38 @@ const CreateQuiz: React.FC = () => {
     timeLimit: 30,
   });
 
+  const [fileContent, setFileContent] = useState<string | null>(null);
   const [questions, setQuestions] = useState<Question[]>([]);
   const [excludedQuestions, setExcludedQuestions] = useState<string[]>([]);
   const [isPublished, setIsPublished] = useState(false);
+  const [fileError, setFileError] = useState<string | null>(null);
   const { generateQuestions, loading, error } = useAIQuestions();
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
-    if (acceptedFiles[0]) {
-      setSettings(prev => ({ ...prev, file: acceptedFiles[0] }));
+    const file = acceptedFiles[0];
+    if (file) {
+      if (file.size > MAX_FILE_SIZE) {
+        setFileError('File size too large. Please use a file smaller than 10MB.');
+        return;
+      }
+
+      setFileError(null);
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const content = e.target?.result as string;
+        setFileContent(content);
+        setSettings(prev => ({ 
+          ...prev, 
+          file: { 
+            name: file.name,
+            content 
+          }
+        }));
+      };
+      reader.onerror = () => {
+        setFileError('Error reading file. Please try again.');
+      };
+      reader.readAsText(file);
     }
   }, []);
 
@@ -42,8 +68,19 @@ const CreateQuiz: React.FC = () => {
   });
 
   const handleGenerateQuestions = async () => {
-    const newQuestions = await generateQuestions(settings, excludedQuestions);
-    setQuestions([...questions, ...newQuestions]);
+    try {
+      const settingsWithContent = {
+        ...settings,
+        file: settings.file ? {
+          name: settings.file.name,
+          content: fileContent
+        } : undefined
+      };
+      const newQuestions = await generateQuestions(settingsWithContent, excludedQuestions);
+      setQuestions([...questions, ...newQuestions]);
+    } catch (err) {
+      // Error handling is managed by the useAIQuestions hook
+    }
   };
 
   const handleRemoveQuestion = (index: number) => {
@@ -82,10 +119,10 @@ const CreateQuiz: React.FC = () => {
     <div className="max-w-4xl mx-auto space-y-8">
       <h1 className="text-3xl font-bold text-[#1A2B3C]">Create New Quiz</h1>
 
-      {error && (
+      {(error || fileError) && (
         <div className="bg-red-50 text-red-500 p-4 rounded-lg flex items-center gap-2">
           <AlertCircle className="h-5 w-5" />
-          <span>{error}</span>
+          <span>{error || fileError}</span>
         </div>
       )}
 
